@@ -1,0 +1,32 @@
+{
+  "Mango": {
+    "base_life_days": 7.0,
+    "reference_temp_c": 13.0,
+    "q10": 2.0,
+    "ideal_temp_min": 10,
+    "ideal_temp_max": 15,
+    "safe_temp_min": 13,
+    "safe_temp_max": 30,
+    "quality_decay_factor": 0.15
+  },
+  "Tomato": {
+    "base_life_days": 5.0,
+    "reference_temp_c": 15.0,
+    "q10": 2.5,
+    "ideal_temp_min": 12,
+    "ideal_temp_max": 20,
+    "safe_temp_min": 15,
+    "safe_temp_max": 30,
+    "quality_decay_factor": 0.20
+  },
+  "Apple": {
+    "base_life_days": 30.0,
+    "reference_temp_c": 2.0,
+    "q10": 3.0,
+    "ideal_temp_min": 1,
+    "ideal_temp_max": 4,
+    "safe_temp_min": 1,
+    "safe_temp_max": 10,
+    "quality_decay_factor": 0.05
+  }
+}

@@ -1,0 +1,35 @@
+# Python
+backened/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Next.js
+**/node_modules/
+**/.next/
+**/out/
+**/build/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# TypeScript
+*.tsbuildinfo
+
+# Misc
+.DS_Store
+Thumbs.db
+*.pem
+
+# Vercel
+.vercel/

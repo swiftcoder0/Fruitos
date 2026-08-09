@@ -1,0 +1,4 @@
+commodity,variety,location,expected_demand_kg
+Mango,Dashehari,Lucknow,600
+Mango,Dashehari,Kanpur,900
+Mango,Dashehari,Delhi,1200
