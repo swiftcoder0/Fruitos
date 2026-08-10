@@ -12,9 +12,8 @@ import api from '@/lib/api';
 import { getCommodityTheme } from '@/components/ui/ThemeProvider';
 
 // ---------------------------------------------------------------------------
-// MOCK DATA — shaped exactly like your real API responses
+// MOCK DATA for Mandi ticker only (static)
 // ---------------------------------------------------------------------------
-
 const MANDI_TICKS = [
   { name: 'Lucknow · Mango', price: 48, dir: 'up' },
   { name: 'Kanpur · Mango', price: 54, dir: 'up' },
@@ -24,7 +23,6 @@ const MANDI_TICKS = [
   { name: 'Kolar · Tamatar', price: 19, dir: 'up' },
 ];
 
-// jali lattice texture
 const JALI_BG = `repeating-linear-gradient(45deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 12px),
                   repeating-linear-gradient(-45deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 12px)`;
 
@@ -64,23 +62,67 @@ export default function FarmerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // ------------------------------------------------------------
+  // FIX: fetch latest crop or mock from sessionStorage
+  // ------------------------------------------------------------
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Fetch crop
-        const cropRes = await api.get('/crops/1');
-        setCrop(cropRes.data);
-
-        // Fetch markets
-        const marketRes = await api.get(`/markets/?quantity_kg=${cropRes.data.quantity_kg || 1000}`);
-        const marketData = marketRes.data.markets || [];
-        // Mark the recommended one
-        if (marketRes.data.recommended) {
-          const rec = marketRes.data.recommended;
-          const found = marketData.find((m: any) => m.market === rec.market);
-          if (found) found.recommended = true;
+        // 1. Check sessionStorage for mock crop (from mock registration)
+        const stored = sessionStorage.getItem('mockCrop');
+        if (stored) {
+          const mockCrop = JSON.parse(stored);
+          setCrop(mockCrop);
+          // fetch markets with its quantity
+          const marketRes = await api.get(`/markets/?quantity_kg=${mockCrop.quantity_kg || 1000}`);
+          const marketData = marketRes.data.markets || [];
+          if (marketRes.data.recommended) {
+            const rec = marketRes.data.recommended;
+            const found = marketData.find((m: any) => m.market === rec.market);
+            if (found) found.recommended = true;
+          }
+          setMarkets(marketData);
+          setLoading(false);
+          return;
         }
-        setMarkets(marketData);
+
+        // 2. If backend is available, fetch the LATEST crop
+        try {
+          // get all crops and pick the one with highest id
+          const cropsRes = await api.get('/crops/');
+          if (cropsRes.data && cropsRes.data.length > 0) {
+            const latestCrop = cropsRes.data.sort((a: any, b: any) => b.id - a.id)[0];
+            setCrop(latestCrop);
+            const marketRes = await api.get(`/markets/?quantity_kg=${latestCrop.quantity_kg || 1000}`);
+            const marketData = marketRes.data.markets || [];
+            if (marketRes.data.recommended) {
+              const rec = marketRes.data.recommended;
+              const found = marketData.find((m: any) => m.market === rec.market);
+              if (found) found.recommended = true;
+            }
+            setMarkets(marketData);
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // backend may be down – fall through to default
+        }
+
+        // 3. fallback: default mango (if nothing found)
+        const defaultCrop = {
+          id: 1,
+          farmer_name: 'Ramesh',
+          location: 'Lucknow',
+          commodity: 'Mango',
+          variety: 'Dashehari',
+          quantity_kg: 1000,
+          maturity_stage: 'Approaching harvest',
+          harvest_window_start: new Date(Date.now() + 2*86400000).toISOString(),
+          harvest_window_end: new Date(Date.now() + 4*86400000).toISOString(),
+          weather_risk: 'Rain risk increasing after window',
+        };
+        setCrop(defaultCrop);
+        setError('Showing sample Mango. Please register your crop.');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch data');
       } finally {
@@ -104,11 +146,11 @@ export default function FarmerDashboard() {
     );
   }
 
-  if (error || !crop) {
+  if (error && !crop) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#EFE6DA' }}>
         <div className="text-center">
-          <div className="text-red-600 mb-4">{error || 'No crop found'}</div>
+          <div className="text-red-600 mb-4">{error}</div>
           <Link
             href="/farmer/crop"
             className="inline-block px-6 py-3 rounded-xl text-white font-semibold"
@@ -121,9 +163,10 @@ export default function FarmerDashboard() {
     );
   }
 
-  const theme = getCommodityTheme(crop.commodity);
+  // theme is now dynamic based on actual crop.commodity
+  const theme = crop ? getCommodityTheme(crop.commodity) : getCommodityTheme('Mango');
   const bestMarket = markets.find((m) => m.recommended) || markets[0];
-  const daysToHarvest = daysUntil(crop.harvest_window_start);
+  const daysToHarvest = crop ? daysUntil(crop.harvest_window_start) : 0;
 
   return (
     <div
@@ -152,12 +195,11 @@ export default function FarmerDashboard() {
 
       <div
         style={{
-          width: 390,
+          width: '100%',
+          maxWidth: '100%',
           background: paper,
-          borderRadius: 38,
           overflow: 'hidden',
-          boxShadow: '0 30px 60px rgba(43,33,26,0.35)',
-          border: '8px solid #1A1410',
+          minHeight: '100vh',
         }}
       >
         {/* Status Bar */}
@@ -208,47 +250,52 @@ export default function FarmerDashboard() {
         {/* Mandi Ticker */}
         <MandiTicker ticks={MANDI_TICKS} />
 
-        {/* Main Content */}
-        <FarmerHome
-          ink={ink}
-          sub={sub}
-          card={card}
-          line={line}
-          crop={crop}
-          theme={theme}
-          daysToHarvest={daysToHarvest}
-          bestMarket={bestMarket}
-          onGoMarkets={() => router.push('/farmer/markets')}
-        />
+        {/* Main Content – crop is guaranteed non-null here */}
+        {crop && (
+          <FarmerHome
+            ink={ink}
+            sub={sub}
+            card={card}
+            line={line}
+            crop={crop}
+            theme={theme}
+            daysToHarvest={daysToHarvest}
+            bestMarket={bestMarket}
+            onGoMarkets={() => router.push('/farmer/markets')}
+          />
+        )}
 
         {/* Bottom Navigation */}
         <div style={{ display: 'flex', borderTop: `1px solid ${line}`, background: card }}>
           {[
             ['home', 'Home', HomeIcon],
             ['markets', 'Markets', Store],
-          ].map(([key, label, Icon]) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (key === 'home') router.push('/farmer');
-                if (key === 'markets') router.push('/farmer/markets');
-              }}
-              style={{
-                flex: 1,
-                border: 'none',
-                background: 'transparent',
-                padding: '12px 0 10px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 3,
-                position: 'relative',
-              }}
-            >
-              <Icon size={18} color={'#C9BBAB'} />
-              <span style={{ fontSize: 10.5, fontWeight: 600, color: '#C9BBAB' }}>{label}</span>
-            </button>
-          ))}
+          ].map((item, index) => {
+            const [key, label, Icon] = item;
+            return (
+              <button
+                key={index}
+                onClick={() => {
+                  if (key === 'home') router.push('/farmer');
+                  if (key === 'markets') router.push('/farmer/markets');
+                }}
+                style={{
+                  flex: 1,
+                  border: 'none',
+                  background: 'transparent',
+                  padding: '12px 0 10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 3,
+                  position: 'relative',
+                }}
+              >
+                <Icon size={18} color={'#C9BBAB'} />
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: '#C9BBAB' }}>{label}</span>
+              </button>
+            );
+          })}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8, background: card }}>
           <div style={{ width: 120, height: 4, borderRadius: 4, background: '#E7D9C8' }} />
@@ -258,10 +305,7 @@ export default function FarmerDashboard() {
   );
 }
 
-// ===========================================================================
-// Components
-// ===========================================================================
-
+// ---------- Sub Components ----------
 function MandiTicker({ ticks }: { ticks: typeof MANDI_TICKS }) {
   const items = [...ticks, ...ticks];
   return (
@@ -290,6 +334,18 @@ function MandiTicker({ ticks }: { ticks: typeof MANDI_TICKS }) {
   );
 }
 
+interface FarmerHomeProps {
+  ink: string;
+  sub: string;
+  card: string;
+  line: string;
+  crop: Crop;
+  theme: any;
+  daysToHarvest: number;
+  bestMarket: any;
+  onGoMarkets: () => void;
+}
+
 function FarmerHome({
   ink,
   sub,
@@ -300,17 +356,7 @@ function FarmerHome({
   daysToHarvest,
   bestMarket,
   onGoMarkets,
-}: {
-  ink: string;
-  sub: string;
-  card: string;
-  line: string;
-  crop: Crop;
-  theme: any;
-  daysToHarvest: number;
-  bestMarket: any;
-  onGoMarkets: () => void;
-}) {
+}: FarmerHomeProps) {
   return (
     <div style={{ padding: '10px 20px 18px' }}>
       <div className="fade-item" style={{ marginBottom: 14 }}>
@@ -451,9 +497,9 @@ function FarmerHome({
           { label: 'Find best market', icon: Store, delay: 340, path: '/farmer/markets' },
           { label: 'View weather risk', icon: Sun, delay: 390, path: '/farmer' },
           { label: 'View crop / batch', icon: QrCode, delay: 440, path: '/farmer/harvest' },
-        ].map(({ label, icon: Icon, delay }) => (
+        ].map(({ label, icon: Icon, delay }, index) => (
           <Link
-            key={label}
+            key={index}
             href={label === 'Find best market' ? '/farmer/markets' : '/farmer/harvest'}
             className="fade-item"
             style={{

@@ -43,27 +43,26 @@ export default function FarmerHarvest() {
   const [harvesting, setHarvesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [destination, setDestination] = useState('Kanpur');
+  const [isMockMode, setIsMockMode] = useState(false);
 
   useEffect(() => {
     const fetchCrop = async () => {
       try {
-        // Fetch crop ID 1 (adjust as needed)
+        // Check Mock Mode
+        const stored = sessionStorage.getItem('mockCrop');
+        if (stored) {
+          const mockCrop = JSON.parse(stored);
+          setCrop(mockCrop);
+          setIsMockMode(true);
+          setLoading(false);
+          return;
+        }
+
+        // Real backend mode
         const res = await api.get('/crops/1');
         setCrop(res.data);
-
-        // Try to get destination from latest batch
-        try {
-          const batchesRes = await api.get('/batches/');
-          if (batchesRes.data && batchesRes.data.length > 0) {
-            const latestBatch = batchesRes.data[batchesRes.data.length - 1];
-            if (latestBatch.destination) {
-              setDestination(latestBatch.destination);
-            }
-          }
-        } catch (e) {
-          // Use default
-        }
-      } catch (err) {
+        setIsMockMode(false);
+      } catch {
         setError('No crop found. Please register a crop first.');
       } finally {
         setLoading(false);
@@ -72,20 +71,61 @@ export default function FarmerHarvest() {
     fetchCrop();
   }, []);
 
+  const generateQR = async (batchId: string): Promise<string> => {
+    try {
+      // Use free QR API
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?data=${batchId}&size=200x200`;
+      const response = await fetch(qrUrl);
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      // fallback: return a placeholder
+      return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+    }
+  };
+
   const handleHarvest = async () => {
     if (!crop) return;
     setHarvesting(true);
     setError(null);
 
     try {
-      const payload = {
-        crop_id: crop.id,
-        quantity_kg: crop.quantity_kg,
-        origin: crop.location,
-        destination: destination,
-      };
-      const res = await api.post('/batches/', payload);
-      setBatch(res.data);
+      if (isMockMode) {
+        // Mock Mode: generate QR and batch locally
+        const batchId = `${crop.commodity.slice(0, 3).toUpperCase()}-${Math.floor(Math.random() * 1000)}`;
+        const qrBase64 = await generateQR(batchId);
+        const mockBatch: Batch = {
+          id: Date.now(),
+          batch_id: batchId,
+          quantity_kg: crop.quantity_kg,
+          origin: crop.location,
+          destination: destination,
+          harvest_time: new Date().toISOString(),
+          current_location: crop.location,
+          quality_index: 0.8,
+          ripeness: 'Medium',
+          defects: 'Low',
+          remaining_life_days: 7,
+          status: 'healthy',
+          qr_code_base64: qrBase64,
+        };
+        sessionStorage.setItem('mockBatch', JSON.stringify(mockBatch));
+        setBatch(mockBatch);
+      } else {
+        // Real backend
+        const payload = {
+          crop_id: crop.id,
+          quantity_kg: crop.quantity_kg,
+          origin: crop.location,
+          destination: destination,
+        };
+        const res = await api.post('/batches/', payload);
+        setBatch(res.data);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to harvest');
     } finally {
@@ -128,8 +168,13 @@ export default function FarmerHarvest() {
           </Link>
         </div>
 
+        {isMockMode && (
+          <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl mb-4 text-sm text-yellow-800">
+            ⚡ Mock Mode: QR generated via external API.
+          </div>
+        )}
+
         {!batch ? (
-          // Before Harvest
           <div>
             <div className="bg-white rounded-2xl shadow-lg p-6 space-y-4">
               <h2 className="font-semibold text-lg">Confirm Harvest Details</h2>
@@ -155,9 +200,14 @@ export default function FarmerHarvest() {
                   <span className="text-gray-600">Maturity</span>
                   <span className="font-medium">{crop.maturity_stage}</span>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span className="text-gray-600">Destination</span>
-                  <span className="font-medium">{destination}</span>
+                  <input
+                    type="text"
+                    value={destination}
+                    onChange={(e) => setDestination(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 w-40"
+                  />
                 </div>
               </div>
 
@@ -184,7 +234,6 @@ export default function FarmerHarvest() {
             </div>
           </div>
         ) : (
-          // After Harvest – Batch Created
           <div>
             <div className="bg-white rounded-2xl shadow-lg p-6 space-y-4">
               <div className="text-center">
@@ -215,7 +264,6 @@ export default function FarmerHarvest() {
                 </div>
               </div>
 
-              {/* QR Code */}
               {batch.qr_code_base64 && (
                 <div className="text-center">
                   <p className="text-sm text-gray-500 mb-2">Scan to track your batch</p>
@@ -239,7 +287,6 @@ export default function FarmerHarvest() {
               )}
             </div>
 
-            {/* Actions */}
             <div className="mt-6 space-y-3">
               <button
                 onClick={() => router.push(`/manager/decision/${batch.id}`)}
@@ -257,7 +304,6 @@ export default function FarmerHarvest() {
               </button>
               <button
                 onClick={() => {
-                  // Download QR as image
                   const link = document.createElement('a');
                   link.href = batch.qr_code_base64;
                   link.download = `${batch.batch_id}-qr.png`;
